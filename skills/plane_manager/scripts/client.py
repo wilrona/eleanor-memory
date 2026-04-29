@@ -98,19 +98,26 @@ def _build_url(base: str, workspace: str, path: str) -> str:
     return f"{base}/api/v1/workspaces/{workspace}/{path.lstrip('/')}"
 
 
+# Multi-workspace support: all 3 workspaces
+ALL_WORKSPACES = ["aligodu", "ease", "st-digital"]
+
+
 def api_request(
     method: str,
     path: str,
     data: Optional[dict] = None,
     params: Optional[dict] = None,
+    workspace: Optional[str] = None,
 ) -> dict:
     """
     Make an authenticated request to the Plane API.
     Raises PlaneError subclasses on failure.
+    If workspace is None, uses the default from PLANE_WORKSPACE_SLUG env.
     """
-    key, base, workspace = _load_env()
+    key, base, default_ws = _load_env()
+    ws = workspace or default_ws
 
-    url = _build_url(base, workspace, path)
+    url = _build_url(base, ws, path)
     if params:
         qs = "&".join(f"{k}={v}" for k, v in params.items())
         url = f"{url}?{qs}"
@@ -169,3 +176,47 @@ class PlaneRateLimitError(PlaneError):   pass  # 429
 class PlaneServerError(PlaneError):     pass  # 5xx
 class PlaneConnectionError(PlaneError):  pass  # network
 class PlaneAPIError(PlaneError):        pass  # other HTTP errors
+
+
+# ── Search ─────────────────────────────────────────────────────────────────────
+
+def search_tasks_all_workspaces(query: str, limit_per_workspace: int = 20) -> list[dict]:
+    """
+    Search for tasks by name across all 3 workspaces.
+    Returns list of dicts with: workspace, project_id, project_name, task_id, task_name, state
+    """
+    results = []
+    for ws in ALL_WORKSPACES:
+        try:
+            # Step 1: list projects in this workspace (path relative to workspaces/{ws}/)
+            projects_data = api_request("GET", f"projects/", workspace=ws)
+            project_map = {}  # project_id -> name
+            for p in projects_data.get("results", []):
+                pid = p["id"]
+                project_map[pid] = p.get("name", "Unknown")
+            # Step 2: search work items in each project
+            for pid, pname in project_map.items():
+                try:
+                    data = api_request(
+                        "GET",
+                        f"projects/{pid}/work-items/",
+                        params={"search": query, "limit": limit_per_workspace},
+                        workspace=ws,
+                    )
+                    for wi in data.get("results", []):
+                        results.append({
+                            "workspace": ws,
+                            "project_id": pid,
+                            "project_name": pname,
+                            "task_id": wi["id"],
+                            "task_name": wi.get("name", ""),
+                            "sequence_id": wi.get("sequence_id", ""),
+                            "state": wi.get("state", ""),
+                            "priority": wi.get("priority", "none"),
+                        })
+                except Exception:
+                    pass
+        except Exception:
+            # Skip workspace if error (no project access, etc.)
+            pass
+    return results

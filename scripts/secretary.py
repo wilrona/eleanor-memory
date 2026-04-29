@@ -2396,6 +2396,71 @@ def implement_dev_task(
     }
 
 
+# ─── Search + Implement ─────────────────────────────────────────────────────────
+
+def search_tasks(query: str) -> list[dict]:
+    """
+    Search for tasks across all 3 workspaces.
+    Returns list of dicts with workspace, project_id, task_id, task_name, sequence_id, state.
+    """
+    try:
+        sys.path.insert(0, "/root/.hermes/skills")
+        from plane_manager.scripts.client import search_tasks_all_workspaces
+        return search_tasks_all_workspaces(query)
+    except Exception as e:
+        return [{"error": str(e)}]
+
+
+def cmd_implement(query: str) -> str:
+    """
+    Search for tasks across all workspaces, then prepare implementation.
+    Usage: python3 secretary.py implement "query"
+    """
+    results = search_tasks(query)
+    if not results or (len(results) == 1 and "error" in results[0]):
+        return f"No tasks found for: {query}"
+
+    if len(results) == 1:
+        task = results[0]
+        # Only one result → auto-proceed
+        return _implement_from_search(task)
+
+    # Multiple results → format for user choice
+    lines = [f"Multiple tasks found for '{query}':\n"]
+    for i, t in enumerate(results[:10], 1):
+        lines.append(f"{i}. [{t['workspace']}] {t.get('task_name', 'Untitled')} (id={t['task_id']})")
+    lines.append("\nDis moi le numéro pour continuer, ou 'annule'.")
+    return "\n".join(lines)
+
+
+def _implement_from_search(task: dict) -> str:
+    """Build implementation context from a search result."""
+    task_id = task["task_id"]
+    workspace = task["workspace"]
+
+    # Get project name
+    try:
+        sys.path.insert(0, "/root/.hermes/skills")
+        from plane_manager.scripts.client import api_request
+        project_data = api_request("GET", f"projects/{workspace}/", workspace=workspace)
+        project_name = project_data.get("name", workspace)
+    except Exception:
+        project_name = workspace
+
+    # Get issue info from DB
+    issue_info = get_task_issue_info(task_id, workspace)
+    has_issue = issue_info and issue_info.get("issue_number") is not None
+
+    return {
+        "task_id": task_id,
+        "workspace": workspace,
+        "project_name": project_name,
+        "task_name": task.get("task_name", ""),
+        "has_issue": has_issue,
+        "issue_number": issue_info.get("issue_number") if has_issue else None,
+    }
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def cmd_recap(days: int = 7, workspace: str = None):
@@ -2556,7 +2621,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="SecretaryIA Local Engine")
-    parser.add_argument("command", choices=["recap", "status", "metadata", "proposals", "move", "done", "estimate", "complete"],
+    parser.add_argument("command", choices=["recap", "status", "metadata", "proposals", "move", "done", "estimate", "complete", "implement"],
                         help="Command to run")
     parser.add_argument("--days", type=int, default=7, help="Number of days to include in recap")
     parser.add_argument("--workspace", type=str, help="Filter by workspace slug")
@@ -2568,7 +2633,8 @@ if __name__ == "__main__":
     parser.add_argument("--duration", type=float, help="Override duration in hours")
     parser.add_argument("--actual-h", type=float, help="Actual duration in hours (for complete command)")
     parser.add_argument("--user-h", type=float, help="User-accepted estimation in hours (for estimate command)")
-    
+    parser.add_argument("--query", type=str, help="Search query (for implement command)")
+
     args = parser.parse_args()
     
     if args.command == "recap":
@@ -2606,3 +2672,9 @@ if __name__ == "__main__":
             print("Error: --task-id, --workspace, and --actual-h required for complete command")
             sys.exit(1)
         print(cmd_complete(args.task_id, args.workspace, args.actual_h))
+    elif args.command == "implement":
+        if not args.query:
+            print("Error: --query required for implement command")
+            sys.exit(1)
+        result = cmd_implement(args.query)
+        print(result)
