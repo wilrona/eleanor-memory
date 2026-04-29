@@ -1,0 +1,26 @@
+# Security - restore from a separate secure source
+config/.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hermes runtime files (not needed in backup)
+logs/
+sessions/
+state.db*
+cache/
+auth.json
+gateway.pid
+gateway.lock
+node/
+sandboxes/
+image_cache/
+audio_cache/
+hooks/
+pairing/
+memories/*.lock
