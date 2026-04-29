@@ -2470,6 +2470,116 @@ def _implement_from_search(task: dict) -> str:
     }
 
 
+# ─── GitHub Issues Sync ─────────────────────────────────────────────────────────
+
+def fetch_github_issues(repo_path: str, state: str = "open") -> list[dict]:
+    """
+    Fetch GitHub issues for a local repo using gh CLI.
+    Returns list of {number, title, state, labels, url}
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "list", "--state", state, "--json", "number,title,state,labels,url"],
+            capture_output=True, text=True, cwd=repo_path
+        )
+        if result.returncode != 0:
+            return [{"error": result.stderr or "gh CLI not authenticated or not a git repo"}]
+        import json
+        return json.loads(result.stdout)
+    except FileNotFoundError:
+        return [{"error": "gh CLI not found"}]
+    except json.JSONDecodeError:
+        return [{"error": "Failed to parse gh output"}]
+
+
+def get_existing_task_issue_numbers(project_name: str) -> set:
+    """Get set of issue numbers already linked to Plane tasks for this project."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT issue_number FROM task_metadata WHERE issue_number IS NOT NULL AND project_name = ?",
+        (project_name,)
+    ).fetchall()
+    conn.close()
+    return {r["issue_number"] for r in rows}
+
+
+def sync_github_issues(project_name: str, workspace: str) -> dict:
+    """
+    Fetch GitHub issues from a project's repo, compare with Plane tasks,
+    and return a report of issues not yet tracked in Plane.
+    """
+    repo_path = get_project_repo_path(project_name)
+    if not repo_path:
+        return {"error": f"No repo found for project '{project_name}'"}
+
+    # Check if it's a git repo with github remote
+    import subprocess
+    try:
+        remote_result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=repo_path
+        )
+        remote_url = remote_result.stdout.strip()
+        if "github.com" not in remote_url:
+            return {"error": "Repo remote is not github.com — cannot fetch issues"}
+    except Exception:
+        return {"error": "Not a git repo or no origin remote"}
+
+    # Fetch open GitHub issues
+    issues = fetch_github_issues(repo_path, state="open")
+    if "error" in issues:
+        return issues
+
+    if not issues:
+        return {"project_name": project_name, "workspace": workspace, "repo_path": repo_path, "issues": [], "message": "No open GitHub issues found"}
+
+    # Get existing issue numbers already tracked in Plane
+    existing = get_existing_task_issue_numbers(project_name)
+
+    # Filter untracked
+    untracked = [i for i in issues if i["number"] not in existing]
+
+    return {
+        "project_name": project_name,
+        "workspace": workspace,
+        "repo_path": repo_path,
+        "total_open_issues": len(issues),
+        "already_tracked": len(existing),
+        "untracked_issues": untracked,
+    }
+
+
+def cmd_sync_issues(project_name: str, workspace: str = None) -> str:
+    """
+    CLI: python3 secretary.py sync-issues --project <name> [--workspace <ws>]
+    """
+    ws = workspace or "aligodu"
+    result = sync_github_issues(project_name, ws)
+    if "error" in result:
+        return f"❌ {result['error']}"
+
+    untracked = result["untracked_issues"]
+    if not untracked:
+        return f"✅ All {result['total_open_issues']} GitHub issues already tracked in Plane for '{project_name}'"
+
+    lines = [
+        f"📋 GitHub Issues pour '{project_name}' ({result['repo_path']})",
+        f"Total open: {result['total_open_issues']} | Déjà suivis: {result['already_tracked']} | Non suivis: {len(untracked)}",
+        "",
+        "Issues sans tâche Plane :",
+    ]
+    for i in untracked[:15]:
+        labels = ", ".join(l["name"] for l in i.get("labels", [])) or "aucun label"
+        lines.append(f"  #{i['number']} — {i['title']} ({labels})")
+        lines.append(f"    {i['url']}")
+    if len(untracked) > 15:
+        lines.append(f"  ... et {len(untracked) - 15} autres")
+    lines.append("")
+    lines.append(f"Pour créer les tâches Plane : dis 'oui' ou 'crée les {len(untracked)} tâches'")
+    return "\n".join(lines)
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def cmd_recap(days: int = 7, workspace: str = None):
@@ -2630,7 +2740,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="SecretaryIA Local Engine")
-    parser.add_argument("command", choices=["recap", "status", "metadata", "proposals", "move", "done", "estimate", "complete", "implement"],
+    parser.add_argument("command", choices=["recap", "status", "metadata", "proposals", "move", "done", "estimate", "complete", "implement", "sync-issues"],
                         help="Command to run")
     parser.add_argument("--days", type=int, default=7, help="Number of days to include in recap")
     parser.add_argument("--workspace", type=str, help="Filter by workspace slug")
@@ -2643,6 +2753,7 @@ if __name__ == "__main__":
     parser.add_argument("--actual-h", type=float, help="Actual duration in hours (for complete command)")
     parser.add_argument("--user-h", type=float, help="User-accepted estimation in hours (for estimate command)")
     parser.add_argument("--query", type=str, help="Search query (for implement command)")
+    parser.add_argument("--project", type=str, help="Project name (for sync-issues command)")
 
     args = parser.parse_args()
     
@@ -2687,3 +2798,8 @@ if __name__ == "__main__":
             sys.exit(1)
         result = cmd_implement(args.query)
         print(result)
+    elif args.command == "sync-issues":
+        if not args.project:
+            print("Error: --project required for sync-issues command")
+            sys.exit(1)
+        print(cmd_sync_issues(args.project, args.workspace))
