@@ -2,8 +2,8 @@
   "jobs": [
     {
       "id": "e5fb6121b77b",
-      "name": "Brief quotidien Plane — 7h Douala",
-      "prompt": "Run the Plane morning brief script and deliver the output to Telegram.\n\nScript: python3.12 ~/.hermes/scripts/plane_brief.py\n\nThe script:\n1. Fetches all tasks from PERSO, PRO, SIDE projects on Plane\n2. Computes priorities, overload, overdue tasks\n3. Prints a formatted French brief to stdout\n\nThis stdout output is the brief — send it as a Telegram message to the home channel (telegram:1271166902).",
+      "name": "Brief quotidien Plane \u2014 7h Douala",
+      "prompt": "Run the Plane morning brief script and deliver the output to Telegram.\n\nScript: python3.12 ~/.hermes/scripts/plane_brief.py\n\nThe script:\n1. Fetches all tasks from PERSO, PRO, SIDE projects on Plane\n2. Computes priorities, overload, overdue tasks\n3. Prints a formatted French brief to stdout\n\nThis stdout output is the brief \u2014 send it as a Telegram message to the home channel (telegram:1271166902).",
       "skills": [
         "plane_manager"
       ],
@@ -42,7 +42,48 @@
       },
       "enabled_toolsets": null,
       "workdir": null
+    },
+    {
+      "id": "dfde16f79c6b",
+      "name": "Eleanor auto-save \u2014 21h Douala",
+      "prompt": "Run: bash /root/eleanor-memory/eleanor-save.sh \"Auto-save from cron job\"\n\nThis script syncs Eleanor's live config to the eleanor-memory GitHub repo and pushes if there are changes. It handles the case where there are no changes gracefully.\n\nOutput: just print \"Saved\" or \"No changes\" to stdout.",
+      "skills": [],
+      "skill": null,
+      "model": null,
+      "provider": null,
+      "base_url": null,
+      "script": null,
+      "context_from": null,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 20 * * *",
+        "display": "0 20 * * *"
+      },
+      "schedule_display": "0 20 * * *",
+      "repeat": {
+        "times": 999,
+        "completed": 0
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-04-29T00:17:13.657936+00:00",
+      "next_run_at": "2026-04-29T20:00:00+00:00",
+      "last_run_at": null,
+      "last_status": null,
+      "last_error": null,
+      "last_delivery_error": null,
+      "deliver": "local",
+      "origin": {
+        "platform": "telegram",
+        "chat_id": "1271166902",
+        "chat_name": "Wilrona",
+        "thread_id": null
+      },
+      "enabled_toolsets": null,
+      "workdir": null
     }
   ],
-  "updated_at": "2026-04-28T23:32:17.363518+00:00"
+  "updated_at": "2026-04-29T00:17:13.658739+00:00"
 }
