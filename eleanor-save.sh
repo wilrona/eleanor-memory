@@ -12,7 +12,10 @@ cd "$HOME/eleanor-memory"
 cp /root/.hermes/config.yaml config/config.yaml
 cp /root/.hermes/SOUL.md config/SOUL.md
 cp /root/.hermes/memories/USER.md memories/USER.md
+cp /root/.hermes/memories/MEMORY.md memories/MEMORY.md
 cp /root/.hermes/scripts/plane_brief.py scripts/ 2>/dev/null || true
+cp /root/.hermes/scripts/secretary.py scripts/ 2>/dev/null || true
+cp /root/.hermes/scripts/schema.sql scripts/ 2>/dev/null || true
 cp -r /root/.hermes/skills/plane_manager/ skills/ 2>/dev/null || true
 cp -r /root/.hermes/skills/whisper/ skills/ 2>/dev/null || true
 cp /root/.hermes/cron/jobs.json cron/plane_brief.json 2>/dev/null || true
