@@ -2414,8 +2414,17 @@ def search_tasks(query: str) -> list[dict]:
 def cmd_implement(query: str) -> str:
     """
     Search for tasks across all workspaces, then prepare implementation.
+    Supports:
+      - Plain text search: "refonte login"
+      - Issue reference: "issue_123" or "#123" → search GitHub for that issue
     Usage: python3 secretary.py implement "query"
     """
+    # Check if it's an issue reference
+    issue_match = re.search(r'issue[_\s#]*(\d+)|#(\d+)', query, re.IGNORECASE)
+    if issue_match:
+        issue_num = issue_match.group(1) or issue_match.group(2)
+        return f"[ISSUE REFERENCE] issue_#{issue_num} — à implémenter via APEX avec git fetch + apex -IAXP {issue_num}"
+
     results = search_tasks(query)
     if not results or (len(results) == 1 and "error" in results[0]):
         return f"No tasks found for: {query}"
