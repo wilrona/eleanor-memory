@@ -3,20 +3,19 @@
 # This runs automatically via cron, but can also be called manually
 # Usage: bash eleanor-save.sh [optional commit message]
 
-BACKUP_DIR="$HOME/eleanor-memory"
 ELEANOR_DIR="$HOME/.hermes"
 MSG="${1:-Auto-save after session}"
 
-cd "$BACKUP_DIR"
+cd "$HOME/eleanor-memory"
 
-# Sync from live config
-cp "$ELEANOR_DIR/config/config.yaml" config/config.yaml
-cp "$ELEANOR_DIR/SOUL.md" config/SOUL.md
-cp "$ELEANOR_DIR/memories/USER.md" memories/USER.md
-cp "$ELEANOR_DIR/scripts/plane_brief.py" scripts/ 2>/dev/null || true
-cp -r "$ELEANOR_DIR/skills/plane_manager/" skills/ 2>/dev/null || true
-cp -r "$ELEANOR_DIR/skills/whisper/" skills/ 2>/dev/null || true
-cp "$ELEANOR_DIR/cron/jobs.json" cron/plane_brief.json 2>/dev/null || true
+# Sync from live config (use absolute paths to work from any CWD)
+cp /root/.hermes/config.yaml config/config.yaml
+cp /root/.hermes/SOUL.md config/SOUL.md
+cp /root/.hermes/memories/USER.md memories/USER.md
+cp /root/.hermes/scripts/plane_brief.py scripts/ 2>/dev/null || true
+cp -r /root/.hermes/skills/plane_manager/ skills/ 2>/dev/null || true
+cp -r /root/.hermes/skills/whisper/ skills/ 2>/dev/null || true
+cp /root/.hermes/cron/jobs.json cron/plane_brief.json 2>/dev/null || true
 
 # Commit & push
 git add -A
