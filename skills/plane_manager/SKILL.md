@@ -26,8 +26,9 @@ Récupérés automatiquement depuis `~/.hermes/.env` :
 ```
 ~/.hermes/skills/plane_manager/scripts/
 ├── client.py     # Connexion API + cache UUIDs + gestion erreurs
-├── projects.py   # Projets : liste, résumé, sync cache
+├── projects.py   # Projets : liste, création, mise à jour, sync cache
 ├── tasks.py      # Work items : CRUD, states, labels, commentaires
+├── pages.py      # Pages wiki : CRUD (création, lecture, mise à jour, suppression)
 ├── analysis.py   # Analyse : vélocité, retards, ré规划
 └── __init__.py   # Exports publics
 ```
@@ -40,12 +41,14 @@ sys.path.insert(0, "/root/.hermes/skills")
 from plane_manager.scripts import (
     # Projets
     list_projects, get_project_summary, ensure_project,
+    create_project, update_project,
     # Tâches
     create_task, get_task, update_task, delete_task,
-    set_task_state, add_comment,
-    list_tasks,
+    set_task_state, add_comment, list_tasks,
+    # Pages
+    create_page, list_pages, get_page, update_page, delete_page,
     # Analyse
-    get_velocity_report, get_overdue_tasks,
+    analyze_velocity, find_overdue_tasks,
 )
 ```
 
@@ -80,6 +83,34 @@ Résout un nom, identifiant ou UUID de projet en UUID.
 ```python
 pid = ensure_project("PERSO")  # → '6397e2aa-e104-4635-915c-05fb04e9b75e'
 ```
+
+### create_project(name, description="", identifier=None, color=None) → dict
+
+Crée un nouveau projet dans le workspace.
+
+```python
+proj = create_project(
+    name="Mon Nouveau Projet",
+    description="Description du projet...",
+    identifier="MONP",       # 4 chars, auto-généré si absent
+    color="#FF5733",         # optionnel
+)
+# → {'id': '...', 'name': 'Mon Nouveau Projet', 'identifier': 'MONP', ...}
+```
+
+### update_project(project_id, name=None, description=None, identifier=None, color=None) → dict
+
+Met à jour un projet existant.
+
+```python
+proj = update_project(
+    project_id="<uuid>",
+    name="Nouveau nom",
+    description="Nouvelle description",
+)
+```
+
+## Pages (Wiki)
 
 ## Tâches
 
@@ -164,6 +195,57 @@ delete_task(task_id, pid)
 ## États disponibles
 
 Dépendent du projet — typiquement : `Backlog`, `Todo`, `In Progress`, `Done`, `Cancelled`.
+
+## Pages (Wiki)
+
+**Règle importante** : `project_id` (UUID) est requis pour toutes les opérations sur les pages.
+
+### create_page(project_id, name, description="", description_html="") → dict
+
+Crée une nouvelle page wiki dans un projet.
+
+```python
+from plane_manager import create_page, ensure_project
+pid = ensure_project("MONP")
+
+page = create_page(
+    project_id=pid,
+    name="PRD — Mon Projet",
+    description_html="<p>Contenu du PRD...</p>",
+)
+# → {'id': '...', 'name': 'PRD — Mon Projet', ...}
+```
+
+### list_pages(project_id) → list[dict]
+
+Liste toutes les pages d'un projet.
+
+```python
+pages = list_pages(pid)
+for p in pages:
+    print(f"{p['name']} ({p['id']})")
+```
+
+### get_page(page_id, project_id) → dict
+
+Récupère le détail d'une page.
+
+### update_page(page_id, project_id, name=None, description=None, description_html=None) → dict
+
+Met à jour une page existante.
+
+```python
+page = update_page(
+    page_id="<uuid>",
+    project_id=pid,
+    name="PRD — Mon Projet (v2)",
+    description_html="<p>Nouveau contenu...</p>",
+)
+```
+
+### delete_page(page_id, project_id) → bool
+
+Supprime une page. Retourne `True` si succès.
 
 ## Analyse
 

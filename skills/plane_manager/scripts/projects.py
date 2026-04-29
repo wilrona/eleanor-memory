@@ -104,3 +104,77 @@ def ensure_project(name_or_id: str) -> str:
         from plane_manager.scripts.client import PlaneNotFoundError
         raise PlaneNotFoundError(f"Projet introuvable: {name_or_id}")
     return pid
+
+
+def create_project(
+    name: str,
+    description: str = "",
+    identifier: str = None,
+    color: str = None,
+) -> dict:
+    """
+    Create a new project in the workspace.
+
+    Args:
+        name: Project name
+        description: Project description (plain text or markdown)
+        identifier: 4-char project code (e.g. "PROJ"). Auto-generated from name if not provided.
+        color: Project color hex code (e.g. "#FF5733")
+
+    Returns:
+        Normalized project dict with id, name, identifier, etc.
+    """
+    # Auto-generate identifier from name if not provided
+    if identifier is None:
+        identifier = name.upper()[:4]
+
+    payload = {
+        "name": name,
+        "description": description,
+        "identifier": identifier.upper(),
+    }
+    if color:
+        payload["color"] = color
+
+    data = api_request("POST", "projects/", data=payload)
+    project = normalize_project(data)
+    # Cache it
+    cache_project(name, project["id"], project["identifier"])
+    return project
+
+
+def update_project(
+    project_id: str,
+    name: str = None,
+    description: str = None,
+    identifier: str = None,
+    color: str = None,
+) -> dict:
+    """
+    Update an existing project.
+
+    Args:
+        project_id: UUID of the project
+        name: New name (optional)
+        description: New description (optional)
+        identifier: New 4-char code (optional)
+        color: New color hex (optional)
+
+    Returns:
+        Normalized updated project dict.
+    """
+    payload = {}
+    if name is not None:
+        payload["name"] = name
+    if description is not None:
+        payload["description"] = description
+    if identifier is not None:
+        payload["identifier"] = identifier.upper()
+    if color is not None:
+        payload["color"] = color
+
+    data = api_request("PATCH", f"projects/{project_id}/", data=payload)
+    project = normalize_project(data)
+    # Update cache
+    cache_project(project["name"], project["id"], project["identifier"])
+    return project
