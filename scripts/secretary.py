@@ -2067,6 +2067,335 @@ def build_plan_content(project_name: str, prd_content: str, answers: dict) -> st
     return "\n".join(lines)
 
 
+# ─── GitHub Issue (APEX -I) ────────────────────────────────────────────────────
+
+APEX_ROOT = os.path.expanduser("~/.hermes/marketplace/apex")
+
+
+def run_apex_issue(repo_path: str, description: str) -> dict:
+    """
+    Run 'apex -I <description>' in the given repo path.
+    Creates a GitHub issue following APEX issue.md template.
+    Returns {issue_number, issue_url, title, body} on success.
+    """
+    import subprocess
+
+    # Extract a concise title (< 70 chars)
+    title = description[:67] + "..." if len(description) > 70 else description
+
+    # Build body following APEX issue.md template
+    body = f"""## Contexte
+
+{description}
+
+## Critères d'acceptation
+
+- [ ] Critère 1
+- [ ] Critère 2
+- [ ] Critère 3
+
+## Notes techniques
+
+[Pistes d'implémentation ou contraintes identifiées]
+"""
+
+    # Create the issue via gh
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "create",
+             "--title", title,
+             "--body", body],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return {"error": f"gh issue create failed: {result.stderr}"}
+
+        # gh returns URL like: https://github.com/owner/repo/issues/42
+        issue_url = result.stdout.strip()
+        # Extract issue number from URL
+        issue_number = int(issue_url.split("/")[-1])
+
+        return {
+            "issue_number": issue_number,
+            "issue_url": issue_url,
+            "title": title,
+            "body": body,
+        }
+    except subprocess.TimeoutExpired:
+        return {"error": "gh issue create timed out"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_default_branch(repo_path: str) -> str:
+    """Get the default branch of a git repo."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_path, capture_output=True, text=True, timeout=10,
+        )
+        return result.stdout.strip()
+    except:
+        return "main"
+
+
+def git_checkout_and_pull(repo_path: str) -> dict:
+    """Checkout default branch and pull latest changes."""
+    import subprocess
+    default_branch = get_default_branch(repo_path)
+    try:
+        subprocess.run(
+            ["git", "checkout", default_branch],
+            cwd=repo_path, capture_output=True, timeout=30,
+        )
+        subprocess.run(
+            ["git", "pull", "origin", default_branch],
+            cwd=repo_path, capture_output=True, timeout=60,
+        )
+        return {"status": "ok", "branch": default_branch}
+    except subprocess.CalledProcessError as e:
+        return {"error": f"Git command failed: {e.stderr}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ─── DEV Task Issue Workflow ───────────────────────────────────────────────────
+
+def get_project_repo_path(project_name: str) -> Optional[str]:
+    """
+    Get the local repo path for a project from SQLite.
+    Returns None if no repo is associated.
+    """
+    project = get_project_by_name(project_name)
+    if not project:
+        return None
+    local_path = project.get("local_path")
+    if not local_path:
+        return None
+    # Check if it's actually a git repo
+    if os.path.exists(os.path.join(local_path, ".git")):
+        return local_path
+    return None
+
+
+def handle_dev_task_issue_flow(
+    task_title: str,
+    task_description: str,
+    project_name: str,
+    workspace_slug: str,
+) -> dict:
+    """
+    Implements the DEV task + GitHub issue flow:
+
+    1. Detect if project has a repo (from SQLite)
+    2. If repo exists, return ask_issue=True (caller presents the ask to user)
+    3. If no repo, return ask_issue=False (skip issue flow)
+
+    Caller (Hermes chat) should present the ask and call create_dev_issue()
+    if user confirms.
+    """
+    repo_path = get_project_repo_path(project_name)
+
+    result = {
+        "ask_issue": False,
+        "has_repo": False,
+        "repo_path": None,
+        "project_name": project_name,
+        "workspace_slug": workspace_slug,
+        "task_title": task_title,
+        "issue_info": None,
+        "error": None,
+    }
+
+    if not repo_path:
+        # No repo → skip issue flow
+        return result
+
+    # Repo exists
+    result["has_repo"] = True
+    result["repo_path"] = repo_path
+    result["ask_issue"] = True
+    return result
+
+
+def create_dev_issue(
+    task_title: str,
+    task_description: str,
+    project_name: str,
+    workspace_slug: str,
+    repo_path: str,
+) -> dict:
+    """
+    Execute the GitHub issue creation part of the flow:
+    - git checkout default + pull
+    - apex -I <description>
+    - Returns issue info
+    """
+    # 1. Checkout default branch + pull
+    git_result = git_checkout_and_pull(repo_path)
+    if "error" in git_result:
+        return {"error": f"Git checkout/pull failed: {git_result['error']}"}
+
+    # 2. Run apex -I
+    description = task_description or task_title
+    issue_result = run_apex_issue(repo_path, description)
+    if "error" in issue_result:
+        return {"error": f"APEX issue creation failed: {issue_result['error']}"}
+
+    return {
+        "issue_number": issue_result["issue_number"],
+        "issue_url": issue_result["issue_url"],
+        "title": issue_result["title"],
+        "branch": git_result["branch"],
+        "repo_path": repo_path,
+    }
+
+
+def save_task_issue_info(task_id: str, workspace: str, issue_number: int, issue_url: str):
+    """Save GitHub issue info linked to a task."""
+    set_metadata(task_id, workspace, issue_number=issue_number, issue_url=issue_url)
+
+
+# ─── DEV Task Implementation (APEX full workflow) ─────────────────────────────
+
+def get_task_issue_info(task_id: str, workspace: str) -> Optional[dict]:
+    """
+    Get issue info linked to a task from local DB.
+    Returns {issue_number, issue_url} or None.
+    """
+    conn = get_db()
+    row = conn.execute(
+        "SELECT issue_number, issue_url FROM task_metadata WHERE id = ? AND workspace = ?",
+        (task_id, workspace)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row and row[0] else None
+
+
+def slugify(text: str) -> str:
+    """Slugify text for branch/worktree names."""
+    import re
+    text = text.lower()
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'[-\s]+', '-', text).strip('-')
+    return text[:50]
+
+
+def create_apex_worktree(repo_path: str, branch_name: str) -> dict:
+    """
+    Create a git worktree in .worktrees/<branch_name> and checkout a new branch.
+    Returns {worktree_path, branch_name}.
+    """
+    import subprocess
+    worktree_path = os.path.join(repo_path, ".worktrees", branch_name)
+    try:
+        subprocess.run(
+            ["git", "worktree", "add", worktree_path, "-b", branch_name],
+            cwd=repo_path, capture_output=True, text=True, timeout=60, check=True,
+        )
+        return {"worktree_path": worktree_path, "branch_name": branch_name}
+    except subprocess.CalledProcessError as e:
+        return {"error": f"git worktree add failed: {e.stderr}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def build_apex_command(
+    has_issue: bool,
+    issue_number: int = None,
+    worktree_path: str = None,
+    description: str = None,
+) -> str:
+    """
+    Build the apex command string based on workflow mode.
+
+    With issue:    apex -IAXP <issue_number>
+    Without issue: apex -AXP
+    """
+    if has_issue and issue_number:
+        return f"apex -IAXP {issue_number}"
+    else:
+        return "apex -AXP"
+
+
+def implement_dev_task(
+    task_id: str,
+    workspace: str,
+    project_name: str,
+    task_title: str,
+    task_description: str = "",
+    create_worktree: bool = False,
+) -> dict:
+    """
+    Full implementation of a DEV task via APEX workflow.
+
+    Flow:
+    1. Get repo path from SQLite (project_name)
+    2. Check if task has a linked issue (from task_metadata)
+    3. git checkout default + pull
+    4. If create_worktree=True AND no issue: create worktree + run apex -AXP in worktree
+       If no worktree AND no issue: ERROR (need worktree for -AXP without -W?)
+       If has issue: checkout default + run apex -IAXP <num>
+    5. Return {cmd, worktree_path, issue_number, repo_path, branch}
+
+    Caller decides how to execute the apex command (delegate_task, subprocess, etc.)
+    """
+    # Step 1: Get repo
+    repo_path = get_project_repo_path(project_name)
+    if not repo_path:
+        return {"error": f"No repo found for project '{project_name}' in SQLite. Check project setup."}
+
+    # Step 2: Get issue info
+    issue_info = get_task_issue_info(task_id, workspace)
+    has_issue = issue_info and issue_info.get("issue_number") is not None
+    issue_number = issue_info["issue_number"] if has_issue else None
+
+    # Step 3: git checkout default + pull
+    git_result = git_checkout_and_pull(repo_path)
+    if "error" in git_result:
+        return {"error": f"Git checkout/pull failed: {git_result['error']}"}
+
+    branch = git_result["branch"]
+    worktree_path = None
+    cmd = None
+
+    # Step 4: Determine APEX command
+    if has_issue:
+        # Case: has issue → apex -IAXP <num>
+        cmd = build_apex_command(has_issue=True, issue_number=issue_number)
+    elif create_worktree:
+        # Case: no issue + worktree → create worktree, then apex -AXP in worktree
+        branch_name = f"feat/{slugify(task_title)}"
+        wt_result = create_apex_worktree(repo_path, branch_name)
+        if "error" in wt_result:
+            return {"error": f"Worktree creation failed: {wt_result['error']}"}
+        worktree_path = wt_result["worktree_path"]
+        cmd = build_apex_command(has_issue=False)
+    else:
+        # Case: no issue + no worktree → need to know where to run apex
+        # Without -W, apex -AXP assumes you're already in a workdir
+        # We fall back to running in the repo itself
+        cmd = build_apex_command(has_issue=False)
+
+    return {
+        "task_id": task_id,
+        "workspace": workspace,
+        "project_name": project_name,
+        "repo_path": repo_path,
+        "has_issue": has_issue,
+        "issue_number": issue_number,
+        "issue_url": issue_info.get("issue_url") if has_issue else None,
+        "git_branch": branch,
+        "worktree_path": worktree_path,
+        "apex_cmd": cmd,
+        "description": task_description or task_title,
+    }
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def cmd_recap(days: int = 7, workspace: str = None):

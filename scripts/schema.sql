@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS task_metadata (
     override_deadline TEXT,           -- Manual override date
     override_duration REAL,           -- Manual duration (hours)
     notes TEXT,
+    issue_number INTEGER,
+    issue_url TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
